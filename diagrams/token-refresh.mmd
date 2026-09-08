@@ -1,0 +1,14 @@
+flowchart TD
+    SEND[발송 요청] --> READ[Redis에서 유효한 access token 확인]
+    READ --> FCM[FCM 발송]
+
+    BOOT[서버 기동 시 확인] --> REFRESH[토큰 갱신]
+    CRON[선제 갱신] --> REFRESH
+    WATCH[만료 위험 감시] --> REFRESH
+    EMERGENCY[긴급 복구] --> REFRESH
+
+    REFRESH --> LOCAL[프로세스 안 Promise single-flight]
+    LOCAL --> LOCK[Redis 기반 인스턴스 간 조정]
+    LOCK --> OAUTH[외부 OAuth]
+    OAUTH --> SAVE[Redis에 새 access token 저장]
+    SAVE --> READ

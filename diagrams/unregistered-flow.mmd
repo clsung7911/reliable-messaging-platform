@@ -1,0 +1,10 @@
+flowchart TD
+    A[FCM 발송] --> B{UNREGISTERED?}
+    B -->|아니오| C[일반 결과 처리]
+    B -->|예| D[동일 발송 1회 재확인]
+    D --> E{재확인 결과}
+    E -->|성공| F[delivered]
+    E -->|다른 오류| G[단말 토큰 유지 · failed]
+    E -->|UNREGISTERED 재발| H[DB에서 토큰 논리 비활성화]
+    H --> I[sender 기준 skipped / non-retryable]
+    I -. 현재 known gap .-> K[상위 재시도 큐가 제한 범위에서 재등록할 수 있음]
