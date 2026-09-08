@@ -4,13 +4,14 @@ import {
   BeginDelivery,
   DeliveryRecord,
   DeliveryStatus,
+  RecipientState,
   SendMessageRequest,
 } from './contracts';
 
 @Injectable()
 export class RedisStateService {
   private readonly deliveries = new Map<string, DeliveryRecord>();
-  private readonly badges = new Map<string, number>();
+  private readonly recipients = new Map<string, RecipientState>();
   private accessToken: AccessTokenState | null = null;
   private refreshOwned = false;
 
@@ -32,6 +33,7 @@ export class RedisStateService {
       fingerprint,
       status: DeliveryStatus.QUEUED,
       retryable: false,
+      deliveryUnknown: false,
     });
     return { type: 'NEW' };
   }
@@ -40,19 +42,41 @@ export class RedisStateService {
     messageId: string,
     status: DeliveryStatus,
     retryable: boolean,
+    deliveryUnknown: boolean,
     reason?: string,
   ): Promise<void> {
     const existing = this.deliveries.get(messageId);
-    if (!existing) throw new Error('delivery must be queued before it is updated');
-    this.deliveries.set(messageId, { ...existing, status, retryable, reason });
+    if (!existing) throw new Error('delivery must be queued before update');
+
+    this.deliveries.set(messageId, {
+      ...existing,
+      status,
+      retryable,
+      deliveryUnknown,
+      reason,
+    });
   }
 
-  async readBadge(recipientRef: string): Promise<number> {
-    return this.badges.get(recipientRef) ?? 0;
+  async findRecipient(recipientRef: string): Promise<RecipientState | null> {
+    const existing = this.recipients.get(recipientRef);
+    if (existing) return existing;
+
+    const publicExample: RecipientState = {
+      recipientRef,
+      deviceToken: `public-example-device-token-${this.recipients.size + 1}`,
+      active: true,
+      badge: 0,
+    };
+    this.recipients.set(recipientRef, publicExample);
+    return publicExample;
   }
 
-  async writeBadge(recipientRef: string, badge: number): Promise<void> {
-    this.badges.set(recipientRef, badge);
+  async deactivateDeviceToken(deviceToken: string): Promise<void> {
+    for (const [recipientRef, state] of this.recipients.entries()) {
+      if (state.deviceToken === deviceToken) {
+        this.recipients.set(recipientRef, { ...state, active: false });
+      }
+    }
   }
 
   async readAccessToken(): Promise<AccessTokenState | null> {
@@ -64,7 +88,7 @@ export class RedisStateService {
   }
 
   async tryStartAccessTokenRefresh(): Promise<boolean> {
-    // A real Redis adapter would use an atomic SET NX operation with expiry.
+    // A real Redis adapter would use an atomic lock with expiry.
     if (this.refreshOwned) return false;
     this.refreshOwned = true;
     return true;

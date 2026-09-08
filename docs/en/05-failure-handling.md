@@ -1,75 +1,42 @@
 # Failure Handling and UNREGISTERED
 
-## Why one failure count was not enough
+## Failure is not one state
 
-A binary FCM success/failure view looked simple, but different negative results required different actions.
+The current outcome model is:
 
-```text
-delivered  FCM accepted the request
-failed     transient or still-unconfirmed failure
-skipped    ineligible target or non-retryable result
-```
+| Outcome | Meaning |
+|---|---|
+| `accepted` | successful FCM response observed |
+| `skipped_unregistered` | token confirmed UNREGISTERED on recheck |
+| `delivery_unknown` | request may have started, but processing cannot be confirmed |
+| `failed` | failure that can be classified as non-delivery or explicit provider failure |
 
-After an app uninstall or reinstall, an old device token may no longer be valid. Counting FCM `UNREGISTERED` with timeouts and 5xx responses polluted the infrastructure-failure signal and encouraged useless retries.
+`accepted` does not mean the Flutter client displayed the notification.
 
-## Current UNREGISTERED path
+## `delivery_unknown`
 
-The service does not deactivate a device token after the first `UNREGISTERED`.
+In one operating case, upstream connection and request-transfer evidence existed while no response returned. Automatically retrying that case could duplicate a message already accepted downstream.
 
-```mermaid
-flowchart TD
-    A[Send to FCM] --> B{UNREGISTERED?}
-    B -->|No| C[Record delivered or failed]
-    B -->|Yes| D[Confirm the same send once]
-    D --> E{Confirmation result}
-    E -->|Success| F[delivered]
-    E -->|Different error| G[Keep token · failed / retryable]
-    E -->|UNREGISTERED again| H[Logically deactivate token]
-    H --> I[skipped]
-```
+The current code therefore classifies timeout/502/504 as `delivery_unknown` and does not immediately resend them.
 
-1. Keep the token after the first `UNREGISTERED`.
-2. Confirm the same send once.
-3. If confirmation succeeds, record `delivered`.
-4. If confirmation returns a different error, do not assume that the token is invalid; retain it and record a retry-evaluable `failed` result.
-5. If confirmation is also `UNREGISTERED`, treat the token as invalid.
-6. Deactivate it logically rather than physically deleting the history.
-7. Record the send as `skipped` in the sender layer and exclude the token from future active recipients.
+This does not claim that the external root cause is known. The root cause remains `UNKNOWN / PENDING`; the retry semantics can still be made safer.
 
-The real confirmation delay, database field, internal status codes, and API response values are not published.
+## UNREGISTERED confirmation
 
-## Why not delete immediately
+After the first `UNREGISTERED`, the same send is confirmed once.
 
-A device token is important state connecting a user and a send. Deleting it from one response could deactivate a healthy token after a transient provider anomaly. Keeping a confirmed invalid token forever would repeatedly fail.
+- success → `accepted`
+- second `UNREGISTERED` → logical token deactivation + `skipped_unregistered`
+- timeout/502/504 → keep token + `delivery_unknown`
+- other retryable failure → keep token + `failed / retryable`
+- other non-retryable failure → keep token + `failed`
 
-I accepted one additional confirmation call and kept history through logical deactivation.
+A different error during recheck is not treated as proof that the token is invalid.
 
-## Retry decisions
+## Provider outcome vs post-processing
 
-| Situation | Handling | Retry |
-|---|---|---|
-| Successful FCM response | delivered | No |
-| Confirmed UNREGISTERED | deactivate + sender-level skipped | Intended: no* |
-| Timeout / transient 5xx | failed | Conditional after `messageId` and retry-limit checks |
-| Invalid request | failed | Not unchanged |
-| Access token unavailable | inspect token recovery | Use bounded recovery path |
-| Unconfirmed cause | failed / unknown reason | Investigate before automatic repetition |
+The refactoring finalizes the FCM outcome before PushLog/Redis/token-state side effects. A logging failure must not turn a confirmed provider result into a reason to resend.
 
-A timeout is particularly ambiguous because FCM may have received the request. Normal retries do not proceed without considering existing `messageId` state.
+## Current validation status
 
-### Current known gap
-
-The sender classifies a confirmed `UNREGISTERED` as non-retryable. The upper retry queue does not yet branch on that status completely, so a logically deactivated invalid token can still be re-queued within the bounded retry path.
-
-The “no retry” row above therefore describes the **intended sender classification**, not a claim that the whole current path is already free of redundant retry. I keep this gap visible as an improvement item.
-
-## Monitoring separation
-
-`skipped` is separated from the failure rate, but not hidden.
-
-- rising `failed`: inspect FCM, OAuth, Redis, and network dependencies,
-- rising `skipped`: inspect installation and device-token lifecycle,
-- rising confirmation successes: inspect possible transient anomalies,
-- rising deactivations: inspect the client re-registration path.
-
-Separating states by the operator's next action made incident triage faster.
+The code changes are complete. Overall DEV E2E and production validation are still pending.

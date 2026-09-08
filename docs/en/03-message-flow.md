@@ -5,104 +5,75 @@
 ```mermaid
 sequenceDiagram
     participant L as Legacy business service
-    participant J as Java / data handoff
+    participant J as Java integration
     participant M as Integration API
-    participant DB as DB Repository
-    participant R as Redis
+    participant R as Redis / DB
     participant C as Common API A or B
+    participant N as Nginx / outbound path
     participant F as FCM
     participant D as Flutter client
 
-    L->>J: send request + messageId
-    J->>M: hand off data with the same messageId
-    M->>R: inspect existing delivery status
-    M->>DB: look up recipient / device token
-    DB-->>M: active device data
-    M->>R: read badge state
-    M->>C: send request
-    C->>R: read FCM access token
-    C->>F: send to FCM
-    F-->>C: result
-    C-->>M: result
-    M->>R: update delivered / failed / skipped and badge state
+    L->>J: business event
+    J->>M: send request
+    M->>R: resolve target / state and manage messageId
+    M->>C: send request + X-Message-Id
+    C->>R: access token / send context
+    C->>N: FCM HTTP request + X-Message-Id
+    N->>F: forward
+    F-->>N: provider response or no confirmed response
+    N-->>C: response / timeout / network error
+    C-->>M: typed outcome
+    M->>R: result state / retry decision
     F-->>D: notification
 ```
 
-Internal service names and routes are removed, but the **call order is kept faithful to the operated system**.
+## Correlation
 
-## Why `messageId` stays end to end
+Retries keep the original `messageId`. `X-Message-Id` extends the same correlation into HTTP and proxy evidence. The real ID format is not published.
 
-Per-service HTTP request IDs looked sufficient until incidents required the Java/data handoff, integration API, common API, Redis state, and FCM result to be joined into one send.
-
-I use `messageId` for:
-
-- log correlation across the NestJS path and FCM result,
-- delivery-status lookup in Redis,
-- duplicate-request detection,
-- confirming that retry or operator action refers to the original send.
+## Outcome model
 
 ```text
-same messageId + equivalent request
-→ inspect the existing in-progress or terminal state
-→ do not create a new logical send
+accepted
+skipped_unregistered
+delivery_unknown
+failed
 ```
 
-This does not provide exactly-once behavior across FCM. It reduces the risk that an upstream retry or timeout becomes an unintended new logical send.
+`delivery_unknown` represents a request that may have started or reached an intermediate/provider boundary but returned no confirmed response.
 
-## DB lookup and Redis state are separate
+## Request-start boundary
 
-Recipient and device-token lookup is performed through a DB repository. Redis keeps only the short-lived operational state needed by the send path.
+A missing response alone is not enough to classify a result as `delivery_unknown`, because failures can also happen before the FCM call.
 
 ```text
-DB Repository
-→ recipient / device token
+failure before FCM request
+→ failed / retryable decision
 
-Redis
-→ FCM access token
-→ badge state
-→ delivery status by messageId
-→ token-refresh coordination
+FCM request started
++ no response
+→ delivery_unknown
+→ no automatic retry
 ```
 
-This distinction is not a public redesign; it reflects the actual separation I worked with.
+## Retry semantics
 
-## Multi-recipient sending
+| Condition | Outcome | Automatic retry |
+|---|---|---|
+| 500 / 503 | failed | bounded |
+| timeout / 502 / 504 | delivery_unknown | no |
+| ECONNREFUSED / ENOTFOUND / EAI_AGAIN | failed | conditionally |
+| response-less transport error after request start | delivery_unknown | no |
+| confirmed UNREGISTERED | skipped_unregistered | no |
 
-The initial path sent recipients sequentially. Device testing showed that total arrival time grew with recipient count, so I changed the work to parallel processing.
+The policy prioritizes duplicate-delivery risk instead of treating every transient-looking error as a reason to resend.
+
+## Validation status
 
 ```text
-request list
-→ parallel per-item send
-→ Promise.allSettled
-→ delivered / skipped / failed aggregation
+Code Changes                  COMPLETE
+Redis reconnect DEV           VALIDATED
+Overall Refactoring DEV E2E   PENDING
+Production Deployment         PENDING
+Production Validation         PENDING
 ```
-
-The important change was not only speed. One recipient lookup or FCM failure no longer stopped the remaining sends.
-
-## Delivery state
-
-```text
-queued
-  ├─ delivered : FCM accepted the request
-  ├─ skipped   : not eligible or classified as non-retryable in the sender layer
-  └─ failed    : requires retry, recovery, or further confirmation
-```
-
-`skipped` and `failed` remain separate because they require different operator actions.
-
-## Timeout and retry
-
-Timeout is ambiguous because the server may fail to receive a response even after FCM accepted the request.
-
-Retry decisions therefore consider:
-
-1. whether the failure is transient,
-2. whether existing `messageId` state can be inspected,
-3. whether another send is acceptably safe,
-4. whether the bounded retry budget remains.
-
-After confirmation, `UNREGISTERED` is classified as `skipped` in the sender layer. A **known gap remains in the upper retry queue**: its status branching is not yet complete, so a confirmed invalid token can still be re-queued within the bounded retry path. See [Failure Handling and UNREGISTERED](05-failure-handling.md).
-
-## Delivery-result boundary
-
-`delivered` here means that FCM accepted the server request. It does not claim that the Flutter device displayed the notification to the user.

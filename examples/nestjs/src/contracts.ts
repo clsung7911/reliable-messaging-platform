@@ -1,8 +1,9 @@
 export enum DeliveryStatus {
-  QUEUED = 'QUEUED',
-  DELIVERED = 'DELIVERED',
-  FAILED = 'FAILED',
-  SKIPPED = 'SKIPPED',
+  QUEUED = 'queued',
+  ACCEPTED = 'accepted',
+  SKIPPED_UNREGISTERED = 'skipped_unregistered',
+  DELIVERY_UNKNOWN = 'delivery_unknown',
+  FAILED = 'failed',
 }
 
 export type SendMessageRequest = {
@@ -16,6 +17,7 @@ export type DeliveryResult = {
   messageId: string;
   status: DeliveryStatus;
   retryable: boolean;
+  deliveryUnknown?: boolean;
   duplicate?: boolean;
   reason?: string;
 };
@@ -24,13 +26,15 @@ export type DeliveryRecord = {
   fingerprint: string;
   status: DeliveryStatus;
   retryable: boolean;
+  deliveryUnknown?: boolean;
   reason?: string;
 };
 
-export type RecipientRecord = {
+export type RecipientState = {
   recipientRef: string;
   deviceToken: string;
   active: boolean;
+  badge: number;
 };
 
 export type AccessTokenState = {
@@ -41,14 +45,18 @@ export type AccessTokenState = {
 export type FcmResponse =
   | { type: 'ACCEPTED' }
   | { type: 'UNREGISTERED' }
-  | { type: 'RETRYABLE_ERROR'; reason: string }
-  | { type: 'PERMANENT_ERROR'; reason: string };
-
-export type CommonSendOutcome =
-  | { type: 'DELIVERED' }
-  | { type: 'UNREGISTERED_CONFIRMED' }
-  | { type: 'FAILED_RETRYABLE'; reason: string }
-  | { type: 'FAILED_PERMANENT'; reason: string };
+  | { type: 'HTTP_ERROR'; status: number }
+  | {
+      type: 'NETWORK_ERROR';
+      code:
+        | 'TIMEOUT'
+        | 'ECONNREFUSED'
+        | 'ENOTFOUND'
+        | 'EAI_AGAIN'
+        | 'ECONNRESET'
+        | 'OTHER';
+      requestStarted: boolean;
+    };
 
 export type BeginDelivery =
   | { type: 'NEW' }

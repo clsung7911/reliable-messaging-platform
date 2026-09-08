@@ -1,68 +1,191 @@
 import { Injectable } from '@nestjs/common';
 import { AccessTokenService } from './access-token.service';
 import {
-  CommonSendOutcome,
-  RecipientRecord,
+  DeliveryResult,
+  DeliveryStatus,
+  FcmResponse,
+  RecipientState,
   SendMessageRequest,
 } from './contracts';
 import { FcmClient } from './fcm-client';
+import { RedisStateService } from './redis-state.service';
 
 @Injectable()
 export class CommonApiService {
   constructor(
+    private readonly redis: RedisStateService,
     private readonly accessToken: AccessTokenService,
     private readonly fcm: FcmClient,
   ) {}
 
-  // In the operated structure this API was deployed as two instances.
-  // It owns the FCM call and uses the shared access-token lifecycle.
+  // In production this boundary is reached over HTTP and runs as two instances.
+  // messageId is also propagated as an HTTP correlation header there.
   async send(
     request: SendMessageRequest,
-    recipient: RecipientRecord,
-    badge: number,
-  ): Promise<CommonSendOutcome> {
-    let token: Awaited<ReturnType<AccessTokenService['getForSend']>>;
+    recipient: RecipientState,
+  ): Promise<DeliveryResult> {
+    let accessToken: Awaited<ReturnType<AccessTokenService['getForSend']>>;
     try {
-      token = await this.accessToken.getForSend();
+      accessToken = await this.accessToken.getForSend();
     } catch {
-      return { type: 'FAILED_RETRYABLE', reason: 'ACCESS_TOKEN_UNAVAILABLE' };
+      return this.result(
+        request,
+        DeliveryStatus.FAILED,
+        true,
+        false,
+        'ACCESS_TOKEN_UNAVAILABLE',
+      );
     }
 
-    const first = await this.trySend(request, recipient, badge, token);
-    if (first.type === 'ACCEPTED') return { type: 'DELIVERED' };
-    if (first.type === 'RETRYABLE_ERROR') {
-      return { type: 'FAILED_RETRYABLE', reason: first.reason };
-    }
-    if (first.type === 'PERMANENT_ERROR') {
-      return { type: 'FAILED_PERMANENT', reason: first.reason };
+    const first = await this.fcm.send(
+      recipient,
+      accessToken,
+      request,
+      request.messageId,
+    );
+
+    if (first.type === 'UNREGISTERED') {
+      const confirmation = await this.fcm.send(
+        recipient,
+        accessToken,
+        request,
+        request.messageId,
+      );
+      return this.handleUnregisteredConfirmation(
+        request,
+        recipient,
+        confirmation,
+      );
     }
 
-    // Current sender policy: confirm UNREGISTERED once before deactivation.
-    const confirmation = await this.trySend(request, recipient, badge, token);
-    if (confirmation.type === 'ACCEPTED') return { type: 'DELIVERED' };
-    if (confirmation.type === 'UNREGISTERED') {
-      return { type: 'UNREGISTERED_CONFIRMED' };
-    }
-    if (confirmation.type === 'RETRYABLE_ERROR') {
-      return { type: 'FAILED_RETRYABLE', reason: confirmation.reason };
-    }
-    return { type: 'FAILED_PERMANENT', reason: confirmation.reason };
+    return this.classify(request, first);
   }
 
-  private async trySend(
+  private async handleUnregisteredConfirmation(
     request: SendMessageRequest,
-    recipient: RecipientRecord,
-    badge: number,
-    token: Awaited<ReturnType<AccessTokenService['getForSend']>>,
-  ) {
-    try {
-      return await this.fcm.send(recipient, token, {
-        title: request.title,
-        body: request.body,
-        badge,
-      });
-    } catch {
-      return { type: 'RETRYABLE_ERROR', reason: 'FCM_REQUEST_ERROR' } as const;
+    recipient: RecipientState,
+    confirmation: FcmResponse,
+  ): Promise<DeliveryResult> {
+    if (confirmation.type === 'ACCEPTED') {
+      return this.result(request, DeliveryStatus.ACCEPTED, false);
     }
+
+    if (confirmation.type === 'UNREGISTERED') {
+      await this.redis.deactivateDeviceToken(recipient.deviceToken);
+      return this.result(
+        request,
+        DeliveryStatus.SKIPPED_UNREGISTERED,
+        false,
+        false,
+        'UNREGISTERED_CONFIRMED',
+      );
+    }
+
+    // A different confirmation error is not evidence that the token is invalid.
+    return this.classify(request, confirmation);
+  }
+
+  private classify(
+    request: SendMessageRequest,
+    response: FcmResponse,
+  ): DeliveryResult {
+    if (response.type === 'ACCEPTED') {
+      return this.result(request, DeliveryStatus.ACCEPTED, false);
+    }
+
+    if (response.type === 'UNREGISTERED') {
+      // This branch is handled by the confirmation path above.
+      return this.result(
+        request,
+        DeliveryStatus.FAILED,
+        false,
+        false,
+        'UNREGISTERED_REQUIRES_CONFIRMATION',
+      );
+    }
+
+    if (response.type === 'HTTP_ERROR') {
+      if (response.status === 502 || response.status === 504) {
+        return this.result(
+          request,
+          DeliveryStatus.DELIVERY_UNKNOWN,
+          false,
+          true,
+          `HTTP_${response.status}`,
+        );
+      }
+
+      if (response.status === 500 || response.status === 503) {
+        return this.result(
+          request,
+          DeliveryStatus.FAILED,
+          true,
+          false,
+          `HTTP_${response.status}`,
+        );
+      }
+
+      return this.result(
+        request,
+        DeliveryStatus.FAILED,
+        false,
+        false,
+        `HTTP_${response.status}`,
+      );
+    }
+
+    if (
+      response.requestStarted &&
+      (response.code === 'TIMEOUT' ||
+        response.code === 'ECONNRESET' ||
+        response.code === 'OTHER')
+    ) {
+      return this.result(
+        request,
+        DeliveryStatus.DELIVERY_UNKNOWN,
+        false,
+        true,
+        response.code,
+      );
+    }
+
+    if (
+      !response.requestStarted &&
+      (response.code === 'ECONNREFUSED' ||
+        response.code === 'ENOTFOUND' ||
+        response.code === 'EAI_AGAIN')
+    ) {
+      return this.result(
+        request,
+        DeliveryStatus.FAILED,
+        true,
+        false,
+        response.code,
+      );
+    }
+
+    return this.result(
+      request,
+      DeliveryStatus.FAILED,
+      false,
+      false,
+      response.code,
+    );
+  }
+
+  private result(
+    request: SendMessageRequest,
+    status: DeliveryStatus,
+    retryable: boolean,
+    deliveryUnknown = false,
+    reason?: string,
+  ): DeliveryResult {
+    return {
+      messageId: request.messageId,
+      status,
+      retryable,
+      deliveryUnknown,
+      reason,
+    };
   }
 }

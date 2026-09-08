@@ -1,25 +1,13 @@
 # Confirm `UNREGISTERED` Before Deactivation
 
-## Context
+After the first `UNREGISTERED`, the same send is confirmed once.
 
-FCM `UNREGISTERED` indicates a device token that is no longer usable. Keeping it causes repeated failures, while immediate deletion after one response risks deactivating a valid token after a transient anomaly.
+- success → `accepted`
+- second `UNREGISTERED` → logically deactivate token + `skipped_unregistered`
+- timeout/502/504 → keep token + `delivery_unknown`
+- other retryable failure → keep token + `failed / retryable`
+- other failure → keep token + `failed`
 
-## Decision
+A different error during confirmation is not proof that the token is invalid.
 
-Confirm the same send once after the first `UNREGISTERED`.
-
-- confirmation succeeds: `delivered`,
-- confirmation returns a different error: keep the token and record `failed`,
-- confirmation is also `UNREGISTERED`: logically deactivate the token and record `skipped`.
-
-A confirmed invalid token is classified as non-retryable in the sender layer. A known gap remains in the upper retry queue, where incomplete status branching can still re-queue it within the bounded retry path.
-
-## Trade-offs
-
-- One extra FCM call is made for an invalid-token candidate.
-- Deactivation is slower than immediate handling.
-- The server state must be considered together with client token re-registration.
-
-## Disclosure
-
-The real confirmation delay, database fields, internal status codes, and device identifiers are not published.
+The refactoring also propagates typed outcome semantics upward so confirmed UNREGISTERED is terminal instead of being blindly placed on a retry queue. Code change is complete; overall DEV/production validation is pending.

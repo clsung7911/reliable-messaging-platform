@@ -4,62 +4,93 @@
 
 ### 1. FCM 호출보다 그 앞뒤 상태가 더 어려웠다
 
-발송 API 자체보다 access token 만료, 두 인스턴스의 갱신 경쟁, 단말 토큰 무효화, 부분 실패, 로그 연결이 운영 시간을 더 많이 차지했다.
+access token 만료, 두 인스턴스의 갱신 경쟁, 무효 단말, 부분 실패, Redis reconnect,
+로그 연결과 Retry 의미를 정하는 일이 Provider 호출 자체보다 운영에서 더 복잡했다.
 
-### 2. 캐시와 토큰 갱신 구조는 다르다
+### 2. 실패와 전달 여부 불명은 다르다
 
-Redis에 access token을 저장하는 것만으로는 만료 순간의 동시 갱신과 실패 복구가 해결되지 않았다. 누가 갱신하고, 실패하면 언제 다시 확인하며, 기존 token을 언제까지 사용할지를 함께 정해야 했다.
+`timeout`이나 `502/504`에서 response가 없다고 해서 FCM 요청이 전달되지 않았다고 확정할 수 없다.
 
-### 3. 이중화는 실행만 두 개로 만든다고 끝나지 않는다
+이번 리팩토링에서 가장 크게 바꾼 기준은:
 
-갱신 조정, Redis 연결 상태, 서버별 로그, 정기 작업 실행 시점을 인스턴스 기준으로 나눠 봐야 했다.
+```text
+확실한 실패
+≠
+전달 여부 불명
+```
 
-### 4. 실패를 나누면 장애 대응 질문이 달라진다
+이다.
 
-`failed`와 `skipped`를 나눈 뒤에는 “왜 전체 실패율이 올랐지?” 대신 “외부 의존성이 느린가, 아니면 무효 단말이 늘었나?”를 먼저 물을 수 있었다.
+### 3. Retry는 성공률만 높이는 기능이 아니다
 
-### 5. 운영 증거도 검증해야 한다
+Retry가 성공할 수도 있지만, 이미 처리된 메시지를 다시 보내 중복 알림을 만들 수도 있다.
+그래서 이번 정책은 실패율 숫자만 보지 않고 **중복 발송 비용**도 같이 본다.
 
-두 인스턴스가 같은 파일에 로그를 쓰던 사건처럼, 로그 수집 구조가 잘못되면 정확한 코드도 잘못 해석하게 만든다.
+### 4. Observability 실패와 Transport Result는 분리해야 한다
+
+FCM은 정상 응답했는데 로그나 Redis 저장이 실패할 수 있다.
+그 부가 실패 때문에 이미 확인된 Provider outcome을 실패로 바꾸고 다시 보내면 안 된다고 봤다.
+
+### 5. 비동기라고 장애 영향이 자동으로 격리되는 것은 아니다
+
+기존 Java Push 흐름은 이미 Async Event 구조였다.
+그래서 "동기 → 비동기"가 아니라 Push 전용 Executor와 HTTP Client를 분리해
+다른 요청 자원으로 영향이 번지는 범위를 줄이는 쪽을 선택했다.
+
+Executor isolation은 병목 제거와 같은 말이 아니다.
+
+### 6. CODE COMPLETE와 PROD VALIDATED는 다르다
+
+현재 1차 리팩토링은 코드 변경까지 완료했고 Redis reconnect만 DEV에서 별도 검증했다.
+
+```text
+Code Changes                  COMPLETE
+Redis reconnect DEV           VALIDATED
+전체 Refactoring DEV E2E      PENDING
+Production Deployment         PENDING
+Production Validation         PENDING
+```
+
+따라서 지금 문서에서 효과 검증 완료나 운영 안정화 완료를 주장하지 않는다.
 
 ## Redis를 선택한 이유
 
-이 구조에서 필요했던 것은 대규모 이벤트 보관이 아니라 다음과 같은 짧은 공유 상태였다.
+필요했던 것은 대규모 이벤트 보관보다 짧은 공유 상태였다.
 
-- FCM access token과 남은 유효시간
-- badge 상태
-- `messageId` 기준 발송 상태
-- 두 인스턴스 사이의 짧은 토큰 갱신 조정
+- FCM access token
+- 발송 상태와 badge
+- `messageId` 기준 correlation 상태
+- 두 인스턴스의 token refresh 조정
 
-그래서 운영 중 이미 사용하던 Redis가 맞았다. Kafka 같은 broker가 나쁘기 때문이 아니라, 당시에는 장기 backlog, replay, consumer group이 핵심 요구가 아니었다.
+Kafka 같은 broker가 나쁜 것이 아니라, 당시 핵심 요구가 durable backlog/replay가 아니었다.
 
 ## 선택의 대가
 
-- Redis가 발송과 토큰 갱신의 중요한 의존성이 됐다.
-- 토큰 갱신 경로가 여러 개라 서로 겹치지 않게 조정하고 모니터링해야 했다.
-- 병렬 발송은 빨라지는 대신 순간 FCM 호출량과 개별 결과 집계가 늘었다.
-- `UNREGISTERED` 재확인은 멀쩡한 토큰을 보호하는 대신 확인 호출이 한 번 추가된다. 발송 계층에서는 non-retryable로 분류하지만 상위 재시도 큐의 상태 분기가 아직 완전하지 않은 known gap도 남아 있다.
-- `messageId` 기반 중복 처리는 도움이 되지만 외부 FCM까지 exactly-once를 만들어 주지는 않는다.
+- Redis가 중요한 의존성이 된다.
+- `delivery_unknown`을 재시도하지 않으면 실제 미전송인 일부 일시 오류를 복구하지 못할 수 있다.
+- Push Executor가 포화되면 작업이 reject될 수 있다.
+- Outcome과 후처리를 분리하면 Provider 결과와 내부 상태가 일시적으로 어긋날 수 있다.
+- `UNREGISTERED` 재확인은 확인 호출이 한 번 추가된다.
+- `messageId`는 correlation에 도움이 되지만 Provider까지 exactly-once를 보장하지 않는다.
 
 ## 이 저장소의 한계
 
-- FCM 성공 응답 이후 Flutter 단말 화면 표출을 보장하지 않는다.
+- FCM 성공 응답 이후 Flutter 화면 표출을 보장하지 않는다.
 - 회사 운영 소스와 topology를 재현한 실행 가능한 제품이 아니다.
-- 실제 API 경로, Redis key, token TTL, lock 시간, 재시도 횟수, 모니터링 임계값을 공개하지 않는다.
+- 실제 API 경로, Redis key, token TTL, lock 시간, 재시도 횟수와 운영 임계값을 공개하지 않는다.
 - 대규모 durable queue, replay, global ordering, cross-region 구성을 다루지 않는다.
-- Firebase Admin SDK 전환은 검토·계획 범위였으며 이 저장소에서 완료된 구현처럼 말하지 않는다.
-- 운영 검증이 끝나지 않은 Redis 자동 재연결 보완도 완료된 재발 방지 성과로 쓰지 않는다.
+- 1차 Reliability Refactoring의 전체 DEV/PROD 검증은 아직 완료되지 않았다.
+- timeout/502/504 외부 Root Cause는 아직 `UNKNOWN / PENDING`이다.
 
-## 지금 다시 본다면
+## 지금 다시 확인하는 순서
 
-구조를 완전히 새로 만들기보다 먼저 다음을 확인할 것이다.
+1. FCM 요청이 실제로 시작됐는가
+2. response가 없는 상태를 미전송으로 잘못 보고 있지 않은가
+3. common API와 연계 API가 같은 outcome 의미를 쓰는가
+4. Retry가 같은 `messageId`를 유지하는가
+5. Provider outcome과 로그/Redis 후처리가 같은 catch에 묶여 있지 않은가
+6. Redis connection이 dependency 복구 뒤 자동으로 살아나는가
+7. Push Executor 포화가 요청 스레드로 되돌아오지 않는가
+8. 검증 상태가 CODE / DEV / PROD 중 어디까지인가
 
-1. `messageId`가 실제 E2E 경계를 모두 지나가는가
-2. 정상 발송이 외부 OAuth 갱신을 기다리는가
-3. 두 공통 API 인스턴스가 같은 갱신을 반복하는가
-4. `UNREGISTERED`가 장애 실패와 섞이는가
-5. Redis·OAuth·FCM 상태를 프로세스 상태와 따로 볼 수 있는가
-6. 한 건의 실패가 배치 전체에 전파되는가
-7. 로그의 인스턴스와 수집 경로를 믿을 수 있는가
-
-이 질문들은 책에서 먼저 정한 체크리스트가 아니라, 실제로 장애를 겪고 나서 남은 순서다.
+이 순서는 책에서 먼저 만든 체크리스트가 아니라, 실제 장애와 리팩토링을 거치면서 남은 순서다.

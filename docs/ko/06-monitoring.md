@@ -1,106 +1,104 @@
 # 모니터링과 로그
 
-## HTTP 상태만으로는 원인을 찾지 못했다
+## HTTP status 하나로는 부족했다
 
-504가 보였을 때 처음에는 Nginx 문제처럼 보였다. 하지만 실제 병목은 FCM 호출 전 access token을 갱신하는 외부 OAuth 구간이었다. 이 경험 이후부터 “발송 API가 실패했다”보다 **어느 구간에서 시간이 늘었는지**를 먼저 보게 됐다.
+운영 장애를 볼 때 500, 502, 504, timeout이 모두 `failed` 하나로 들어가면
+무엇을 다시 보내야 하고 무엇을 조사해야 하는지 바로 알기 어려웠다.
 
-## 운영에서 나눠 본 값
-
-### 발송 결과
+이번 1차 리팩토링에서는 결과 의미를 다음처럼 본다.
 
 ```text
-queued
-delivered
+accepted
+skipped_unregistered
+delivery_unknown
 failed
-skipped
 ```
 
-성공률을 볼 때도 정책상 발송하지 않은 `skipped`를 실제 발송 실패와 섞지 않았다.
-
-### 구간별 시간
-
-- 연계 API가 요청을 받은 뒤 공통 API의 발송 결과를 받기까지
-- DB에서 수신 대상/단말 토큰을 조회하는 구간
-- Redis에서 badge와 발송 상태를 확인하는 구간
-- FCM access token을 읽거나 갱신하는 구간
-- FCM API가 응답할 때까지의 구간
-- 발송 결과를 Redis에 기록하는 구간
-
-전체 시간 하나만 보면 “메시징이 느리다”에서 멈춘다. 구간을 나누면 OAuth인지 FCM인지 Redis인지부터 갈라서 볼 수 있었다.
-
-### 토큰 갱신 상태
-
-- access token 존재 여부와 남은 유효시간
-- 정기 갱신 실행·성공·실패
-- 연속 실패와 긴급 복구
-- 두 인스턴스의 갱신 시점
-- Redis 기반 갱신 조정 결과
-
-발송이 아직 성공해도 갱신이 계속 실패하면 token 만료가 가까워지고 있는 것이다. 그래서 발송 결과와 별도 화면으로 확인했다.
-
-## `messageId`로 다시 연결
-
-로그에는 민감한 payload 대신 다음 문맥을 남겼다.
+그리고 Retry 여부는 별도 의미로 본다.
 
 ```text
-messageId
-instance
-stage
-result
-duration
-retry 여부
-dependency
+retryable = true / false
 ```
 
-`messageId`를 이용해 Java/데이터 전달, 연계 API, 공통 API, DB 조회, Redis 상태, FCM 응답을 한 흐름으로 찾을 수 있게 했다. 단말 토큰과 사용자 식별정보, access token은 로그에 남기지 않는다.
+`delivery_unknown`은 특히 중요한 운영 상태다. 요청이 이미 전달됐을 수 있기 때문에
+실패율 숫자 하나로 합치고 자동 재발송하면 안 된다.
 
-## Grafana와 Loki
+## 기존 metric 이름과 의미
 
-Grafana에서는 발송 결과, 구간별 시간, token 상태와 갱신 결과를 확인했다. Loki에서는 `messageId`와 인스턴스를 기준으로 로그를 좁혔다.
+운영 metric에는 기존 호환성 때문에 `fcm_delivered` 같은 이름이 남아 있다.
 
-도구 자체보다 중요한 것은 질문 순서였다.
+하지만 의미는 다음에 가깝다.
 
 ```text
-queued가 평소와 같은가
-→ delivered / failed / skipped 중 무엇이 변했나
-→ 어느 구간의 시간이 늘었나
-→ Redis / OAuth / FCM 중 어디가 달라졌나
-→ 해당 messageId와 인스턴스 로그가 맞나
+fcm_delivered
+≈ FCM accepted
+≠ Flutter 단말 화면 표출 완료
 ```
 
-## 로그 자체가 잘못될 수 있었던 사건
+이 이름을 보고 실제 사용자 표시 완료까지 확장해서 해석하지 않는다.
 
-공통 API 두 인스턴스의 로그를 비교했는데 파일 크기와 내용이 이상할 정도로 같았다. 처음에는 두 인스턴스가 같은 오류를 동시에 낸 것으로 볼 수도 있었다.
+## 구간별로 보는 값
 
-하지만 바이트 단위로 확인하니 두 컨테이너가 공유 스토리지의 같은 파일에 기록하고 있었다. 로그가 섞였을 뿐 아니라 동시 쓰기로 일부 내용이 손상될 수 있는 구조였다.
+- Java Push 실행 구간
+- 연계 API → 공통 API 호출 구간
+- Redis access token / 상태 조회 구간
+- 공통 API → Nginx → FCM 호출 구간
+- outcome 확정 뒤 로그/Redis 후처리 구간
 
-조치는 다음과 같았다.
+전체 HTTP 시간 하나보다 어느 경계에서 시간이 늘었는지를 먼저 본다.
 
-- 인스턴스별 로그 경로 분리
-- 모든 로그에 인스턴스 식별값 추가
-- 한 인스턴스씩 순서대로 적용하고 기동 상태 확인
-- 분석 결과가 구조와 맞지 않을 때 로그 수집 경로부터 재검증
+## `messageId`와 `X-Message-Id`
 
-이 사건 이후 로그는 “있는 그대로의 사실”이 아니라, 수집과 저장까지 정상일 때만 믿을 수 있는 증거라고 보게 됐다.
+Retry에서도 같은 `messageId`를 유지하고, 서비스 간 HTTP 요청에는 `X-Message-Id`를 전달한다.
 
-## 프로세스 실행 상태와 기능 상태 분리
-
-서버 재기동 뒤 공통 API 프로세스는 살아 있었지만 Redis 연결이 끊긴 채 복구되지 않아 발송 관련 요청이 계속 실패한 적이 있었다.
-
-그래서 다음을 구분해 본다.
+운영에서 확인하려는 흐름:
 
 ```text
-프로세스 실행 중
-Redis 연결 준비됨
-유효한 FCM access token 있음
-외부 OAuth 연결 가능
-FCM 호출 가능
+Java 요청
+→ 연계 API
+→ 공통 API
+→ Nginx / 외부 호출
+→ outcome
 ```
 
-`UP` 하나로 묶으면 운영자가 실제로 복구해야 할 위치를 찾기 어렵다.
+같은 발송을 하나의 ID로 찾는 것이 목적이지, ID 자체로 exactly-once를 보장하는 것은 아니다.
+
+실제 ID 규칙과 값은 공개하지 않는다.
+
+## Outcome과 Observability를 따로 본다
+
+FCM Provider 결과가 성공했는데 PushLog나 Redis 저장이 실패할 수 있다.
+현재 코드는 이 둘을 같은 결과로 뒤집지 않도록 경계를 분리했다.
+
+그래서 운영에서는 다음 두 질문을 따로 본다.
+
+```text
+Provider outcome은 무엇이었나?
+내부 상태/로그는 정상적으로 남았나?
+```
+
+둘이 어긋나면 재발송부터 하지 않고 상태 저장 경로를 확인한다.
+
+## Redis reconnect
+
+서버 작업 뒤 프로세스는 살아 있지만 Redis connection이 복구되지 않아 503이 지속된 사건이 있었다.
+
+이후에는:
+
+```text
+process running
+Redis connect / ready
+Redis reconnecting / close / end
+valid FCM access token
+FCM request result
+```
+
+을 분리해 본다.
+
+Redis reconnect 변경은 개발환경에서 확인했고, 운영 반영/실제 자동복구 검증은 아직 PENDING이다.
 
 ## 내가 모니터링에서 지키는 기준
 
-> 숫자를 많이 만드는 것보다, 장애가 났을 때 다음으로 어디를 봐야 하는지 알 수 있어야 한다.
+> 지표가 많아지는 것보다, 지금 이 결과가 다시 보내도 되는 실패인지 먼저 구분할 수 있어야 한다.
 
-실제 metric 이름, dashboard 주소, 조직·센터 label과 경보 임계값은 공개하지 않는다.
+실제 metric 이름 전체, dashboard 주소, 내부 label과 경보 임계값은 공개하지 않는다.

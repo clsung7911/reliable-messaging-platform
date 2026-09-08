@@ -1,22 +1,21 @@
 sequenceDiagram
-    participant L as Legacy service
-    participant J as Java / data handoff
+    participant L as Legacy business service
+    participant J as Java integration
     participant M as Integration API
-    participant DB as DB Repository
-    participant R as Redis
+    participant R as Redis / DB
     participant C as Common API (A or B)
+    participant N as Nginx / outbound path
     participant F as FCM
     participant D as Flutter client
-    L->>J: message request + messageId
-    J->>M: hand off same messageId
-    M->>R: inspect delivery status
-    M->>DB: recipient / device token lookup
-    DB-->>M: active device data
-    M->>R: read badge state
-    M->>C: send request
-    C->>R: read access token
-    C->>F: send
-    F-->>C: result
-    C-->>M: result
-    M->>R: update outcome / badge state
+    L->>J: business event
+    J->>M: send request
+    M->>R: target/state lookup and messageId
+    M->>C: request + X-Message-Id
+    C->>R: access token / send context
+    C->>N: FCM request + X-Message-Id
+    N->>F: forward
+    F-->>N: provider response or no confirmed response
+    N-->>C: response / timeout / network error
+    C-->>M: typed outcome
+    M->>R: result / retry decision
     F-->>D: notification

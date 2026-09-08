@@ -2,54 +2,78 @@
 
 **English** | [한국어](README.ko.md)
 
-This repository documents an FCM notification path that I designed, developed, and operated in production, rewritten into a form I can share publicly while preparing for a career move.
+This repository documents an FCM notification path that I designed, developed, and operated, rewritten into a form I can share publicly while preparing for a career move.
 
-It is not a newly invented messaging product. I reviewed my original work notes and kept the **problems I encountered, the decisions I made, and the changes I operated**. I removed proprietary details without replacing the real service boundaries with an idealized architecture.
+It is not a newly invented messaging product. I reviewed the real operating structure and records and kept the **problems I encountered, the decisions I made, and the changes I implemented**. Proprietary details are removed without replacing the real service boundaries with an idealized architecture.
 
-I used AI to help structure the documents, improve readability, prepare Mermaid diagrams, and translate the English version. The **facts, technical decisions, troubleshooting process, and ownership statements are grounded in my actual work and were checked against my records.** AI was not used to invent experience or incidents.
+I used AI to help structure the documentation, improve readability, prepare Mermaid diagrams, and translate the English version. Technical facts, decisions, troubleshooting steps, and ownership boundaries were reviewed against my actual work and records.
 
 ## System I actually worked with
 
 ```mermaid
 flowchart LR
     L[Legacy business service]
-    J[Java / data handoff]
-    M[Integration API · NestJS]
-    DB[(DB Repository<br/>recipient / device token)]
+    J[Java integration process]
+    M[Integration API<br/>NestJS]
+    DB[(Business DB)]
+    R[(Redis<br/>delivery state / badge<br/>FCM access token<br/>refresh coordination)]
 
     subgraph COMMON[Common API · NestJS · two instances]
         C1[Common API A]
         C2[Common API B]
     end
 
-    R[(Redis<br/>FCM access token<br/>badge state<br/>delivery status by messageId<br/>refresh coordination)]
+    N[Nginx / outbound path]
     F[Firebase Cloud Messaging]
     D[Flutter client]
 
-    L --> J --> M
+    L --> J
+    J --> M
     M --> DB
+    M <--> R
     M --> C1
     M --> C2
-    M -. badge / delivery status .-> R
-    C1 -. access token / refresh coordination .-> R
-    C2 -. access token / refresh coordination .-> R
-    C1 --> F
-    C2 --> F
+    C1 <--> R
+    C2 <--> R
+    C1 --> N
+    C2 --> N
+    N --> F
     F --> D
 ```
 
-The public names describe roles only: legacy business service, Java/data handoff, integration API, and common API. The order and technology boundaries remain faithful to the system I worked on.
+Public names describe roles only. Internal routes, hosts, Redis keys, and operating values are removed, while the service order and technology boundaries remain faithful to the system I worked on.
 
-My direct scope centers on the NestJS server-side path after the Java/data handoff, DB-backed recipient lookup, Redis-backed operational state, FCM integration, monitoring, and incident response. The legacy service and Flutter client are the upstream and downstream boundaries of the end-to-end flow; I do not claim ownership of their entire internal implementations.
+My direct scope centers on the Push path after the Java integration boundary, the NestJS integration and common APIs used for FCM sending, Redis-backed state, FCM integration, monitoring, and incident response. I do not claim ownership of the legacy service or the Flutter client's entire internal implementation.
 
-## Decisions that came from operating it
+## 2026-09 · FCM Reliability Refactoring v1
 
-- Refreshing the FCM access token inside a live send request allowed OAuth latency to become delivery latency and eventually a 504. I moved the token into Redis and separated refresh from normal sending.
-- Because the common API ran as two instances, refresh duplication had to be controlled both inside one process and across instances. I used promise-based single-flight locally and Redis-based coordination across instances.
-- Sequential fan-out accumulated latency with each recipient. I changed it to parallel sending and used `Promise.allSettled` so one item failure would not stop the whole batch.
-- I propagated `messageId` across service boundaries and used it for log correlation, delivery-state lookup, and duplicate-request handling.
-- I did not deactivate a device token after one FCM `UNREGISTERED` response. The sender confirms once; only a second `UNREGISTERED` logically deactivates the token and classifies that send as `skipped`. A known gap remains in the upper retry queue: its status branching is not yet complete, so a confirmed invalid token can still be re-queued within the bounded retry path.
-- I monitored `queued`, `delivered`, `failed`, and `skipped` separately, then split timing by token refresh, FCM call, and Redis work instead of relying on one HTTP duration.
+After reviewing operating incidents and the existing code, I kept the deployed boundaries and changed the semantics around **failure, retry, post-processing, correlation, and Push resource isolation**.
+
+Key changes:
+
+- outcomes are now `accepted / skipped_unregistered / delivery_unknown / failed`,
+- failures before an FCM request are separated from requests that started but returned no confirmed response,
+- `500/503` remain bounded retry candidates, while `timeout/502/504` are treated as `delivery_unknown` and are not automatically resent,
+- UNREGISTERED confirmation paths distinguish invalid-token evidence from other errors,
+- the FCM outcome is finalized before PushLog/Redis status post-processing,
+- the common API defines typed result semantics and the integration API consumes them first,
+- retries keep the same `messageId`, with `X-Message-Id` used for service/proxy correlation,
+- the existing Java async event flow remains, while Push gets its own executor and HTTP client,
+- Redis command failure and connection recovery are treated separately.
+
+Current validation status:
+
+```text
+Code Changes                  COMPLETE
+Redis reconnect DEV           VALIDATED
+Overall Refactoring DEV E2E   PENDING
+Production Deployment         PENDING
+Production Validation         PENDING
+```
+
+This repository therefore documents the implemented code and current decisions, not a claim that production stabilization or outcome improvements have already been verified.
+
+See [FCM Reliability Refactoring v1](docs/en/09-fcm-refactoring-v1.md).
 
 ## Documentation
 
@@ -61,6 +85,7 @@ My direct scope centers on the NestJS server-side path after the Java/data hando
 6. [Monitoring and logs](docs/en/06-monitoring.md)
 7. [Troubleshooting records](docs/en/07-troubleshooting.md)
 8. [Lessons and limitations](docs/en/08-lessons-and-limitations.md)
+9. [FCM Reliability Refactoring v1](docs/en/09-fcm-refactoring-v1.md)
 
 ### Decision records
 
@@ -68,31 +93,33 @@ My direct scope centers on the NestJS server-side path after the Java/data hando
 - [Keep short-lived shared state in Redis](docs/en/decisions/02-redis-shared-state.md)
 - [Move token refresh outside the send path](docs/en/decisions/03-token-refresh-outside-send.md)
 - [Confirm `UNREGISTERED` before deactivation](docs/en/decisions/04-unregistered-recheck.md)
+- [Represent ambiguous delivery as `delivery_unknown`](docs/en/decisions/05-delivery-unknown.md)
+- [Separate provider outcome from post-processing failure](docs/en/decisions/06-outcome-postprocessing-isolation.md)
+- [Isolate Push resources without replacing the existing async flow](docs/en/decisions/07-push-resource-isolation.md)
 
 ## Diagrams and example
 
-[`diagrams/`](diagrams/README.md) contains the Mermaid source for the actual public boundaries and flows.
+[`diagrams/`](diagrams/README.md) contains Mermaid source for the public representation of the real boundaries and flows.
 
-[`examples/nestjs/`](examples/nestjs/README.md) is not production source code. It is a small TypeScript example shaped around the real integration API, common API, DB repository, Redis state, and FCM boundaries. It contains no real routes, keys, configuration, or credentials.
+[`examples/nestjs/`](examples/nestjs/README.md) is not production source code and is not evidence that the current refactoring has completed DEV or production validation.
 
 ## What is not published
 
 - company, organization, site, or internal system names,
-- real API paths, hostnames, IP addresses, or network configuration,
-- real Redis keys, operating thresholds, or schedules,
+- real API paths, hostnames, IP addresses, or detailed network configuration,
+- real Redis keys, thresholds, or schedules,
 - credentials, tokens, secrets, or private keys,
 - production log lines or sensitive payloads,
 - real user or device identifiers,
 - company source code or the complete production topology.
 
-All sample names and values are public placeholders. The flow, problems, decisions, and resolution directions remain grounded in the actual experience.
-
 ## What this repository does not claim
 
-- proof that an end user displayed a notification after FCM accepted it,
+- proof of Flutter display after FCM accepted a request,
 - exactly-once delivery across an external provider,
 - durable large-scale queueing or replay,
-- a universal architecture for every messaging product,
-- ownership of the Flutter client's entire reception, display, and token-registration implementation.
+- a universal messaging architecture,
+- ownership of the Flutter client's entire implementation,
+- completed DEV or production validation for the current refactoring.
 
-The purpose is not to write a messaging textbook. It is to explain, within a safe disclosure boundary, **how I built and changed one operated system and why those decisions were made**.
+The purpose is not to write a messaging textbook. It is to show, within a safe disclosure boundary, **how one operated system evolved as incidents changed my engineering decisions**.

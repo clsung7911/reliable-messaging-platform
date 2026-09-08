@@ -1,22 +1,25 @@
 flowchart LR
     L[Legacy business service]
-    J[Java / data handoff]
+    J[Java integration process]
     M[Integration API · NestJS]
-    DB[(DB Repository<br/>recipient / device token)]
+    DB[(Business DB)]
+    R[(Redis<br/>delivery state / badge<br/>FCM access token<br/>refresh coordination)]
     subgraph COMMON[Common API · NestJS · two instances]
         C1[Common API A]
         C2[Common API B]
     end
-    R[(Redis<br/>FCM access token<br/>badge state<br/>delivery status by messageId<br/>refresh coordination)]
+    N[Nginx / outbound path]
     F[Firebase Cloud Messaging]
     D[Flutter client]
-    L --> J --> M
+    L --> J
+    J --> M
     M --> DB
+    M <--> R
     M --> C1
     M --> C2
-    M -. badge / delivery status .-> R
-    C1 -. access token / refresh coordination .-> R
-    C2 -. access token / refresh coordination .-> R
-    C1 --> F
-    C2 --> F
+    C1 <--> R
+    C2 <--> R
+    C1 --> N
+    C2 --> N
+    N --> F
     F --> D

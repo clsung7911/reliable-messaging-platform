@@ -1,19 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { CommonApiService } from './common-api.service';
 import {
-  CommonSendOutcome,
   DeliveryResult,
   DeliveryStatus,
   SendMessageRequest,
 } from './contracts';
-import { RecipientRepository } from './recipient.repository';
 import { RedisStateService } from './redis-state.service';
 
 @Injectable()
 export class IntegrationMessagingApiService {
   constructor(
     private readonly redis: RedisStateService,
-    private readonly recipients: RecipientRepository,
     private readonly commonApi: CommonApiService,
   ) {}
 
@@ -29,63 +26,59 @@ export class IntegrationMessagingApiService {
             messageId: requests[index].messageId,
             status: DeliveryStatus.FAILED,
             retryable: true,
-            reason: 'UNEXPECTED_SEND_ERROR',
+            deliveryUnknown: false,
+            reason: 'UNEXPECTED_INTEGRATION_ERROR',
           },
     );
   }
 
   private async sendOne(request: SendMessageRequest): Promise<DeliveryResult> {
     const begin = await this.redis.beginDelivery(request);
+
     if (begin.type === 'CONFLICT') {
-      return this.result(request, DeliveryStatus.FAILED, false, 'MESSAGE_ID_CONFLICT');
+      return this.result(
+        request,
+        DeliveryStatus.FAILED,
+        false,
+        false,
+        'MESSAGE_ID_CONFLICT',
+      );
     }
+
     if (begin.type === 'EXISTING') {
       return {
         messageId: request.messageId,
         status: begin.record.status,
         retryable: begin.record.retryable,
+        deliveryUnknown: begin.record.deliveryUnknown,
         reason: begin.record.reason,
         duplicate: true,
       };
     }
 
-    const recipient = await this.recipients.findActive(request.recipientRef);
-    if (!recipient) {
-      return this.record(request, DeliveryStatus.SKIPPED, false, 'NO_ACTIVE_DEVICE');
-    }
-
-    const badge = await this.redis.readBadge(request.recipientRef);
-    const outcome = await this.commonApi.send(request, recipient, badge);
-    return this.applyOutcome(request, recipient.deviceToken, badge, outcome);
-  }
-
-  private async applyOutcome(
-    request: SendMessageRequest,
-    deviceToken: string,
-    currentBadge: number,
-    outcome: CommonSendOutcome,
-  ): Promise<DeliveryResult> {
-    if (outcome.type === 'DELIVERED') {
-      await this.redis.writeBadge(request.recipientRef, currentBadge + 1);
-      return this.record(request, DeliveryStatus.DELIVERED, false);
-    }
-
-    if (outcome.type === 'UNREGISTERED_CONFIRMED') {
-      await this.recipients.deactivateDeviceToken(deviceToken);
-      // Sender-level intent is non-retryable/skipped. The real upper retry queue
-      // still has a documented status-branching gap; this example stops here.
+    const recipient = await this.redis.findRecipient(request.recipientRef);
+    if (!recipient || !recipient.active) {
+      // The real system also has pre-send skip cases. This sample keeps them
+      // outside the FCM-provider outcome taxonomy to stay focused.
       return this.record(
         request,
-        DeliveryStatus.SKIPPED,
+        DeliveryStatus.FAILED,
         false,
-        'UNREGISTERED_CONFIRMED',
+        false,
+        'NO_ACTIVE_DEVICE',
       );
     }
 
+    // Production uses an HTTP call and propagates messageId as X-Message-Id.
+    const outcome = await this.commonApi.send(request, recipient);
+
+    // Only clear retryable failures should enter an upstream retry mechanism.
+    // delivery_unknown is deliberately non-retryable.
     return this.record(
       request,
-      DeliveryStatus.FAILED,
-      outcome.type === 'FAILED_RETRYABLE',
+      outcome.status,
+      outcome.retryable,
+      outcome.deliveryUnknown ?? false,
       outcome.reason,
     );
   }
@@ -94,18 +87,38 @@ export class IntegrationMessagingApiService {
     request: SendMessageRequest,
     status: DeliveryStatus,
     retryable: boolean,
+    deliveryUnknown: boolean,
     reason?: string,
   ): Promise<DeliveryResult> {
-    await this.redis.updateDelivery(request.messageId, status, retryable, reason);
-    return this.result(request, status, retryable, reason);
+    await this.redis.updateDelivery(
+      request.messageId,
+      status,
+      retryable,
+      deliveryUnknown,
+      reason,
+    );
+    return this.result(
+      request,
+      status,
+      retryable,
+      deliveryUnknown,
+      reason,
+    );
   }
 
   private result(
     request: SendMessageRequest,
     status: DeliveryStatus,
     retryable: boolean,
+    deliveryUnknown: boolean,
     reason?: string,
   ): DeliveryResult {
-    return { messageId: request.messageId, status, retryable, reason };
+    return {
+      messageId: request.messageId,
+      status,
+      retryable,
+      deliveryUnknown,
+      reason,
+    };
   }
 }

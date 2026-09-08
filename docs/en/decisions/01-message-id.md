@@ -1,30 +1,9 @@
 # Use `messageId` as the End-to-End Identity
 
-## Context
+A send crosses Java integration, the integration API, the common API, Redis state, the outbound proxy path, and FCM.
 
-One send request crosses the legacy service, Java/data handoff, integration API, common API, Redis state, and FCM call. Per-service request IDs made it difficult to reconstruct the same send during an incident.
+The same `messageId` is kept across retries. `X-Message-Id` carries that correlation through HTTP and proxy evidence.
 
-## Decision
+This supports log/state/retry correlation; it does not provide exactly-once delivery. The real ID format is not published.
 
-Keep the business `messageId` across every boundary.
-
-```text
-Java/data handoff log
-Integration API log
-Common API log
-Redis delivery status
-FCM result
-          ↑ same messageId
-```
-
-The value supports both log correlation and duplicate-request handling.
-
-## Trade-offs
-
-- Conflicting reuse of one `messageId` with a different payload must be rejected.
-- Very old retries need a policy after state retention expires.
-- The identifier must not be described as exactly-once delivery across FCM and the device.
-
-## Disclosure
-
-The real ID format and values are not published. The example shows only the field's role.
+The code change is complete. Overall DEV E2E and production validation remain pending.
