@@ -65,13 +65,16 @@ flowchart LR
 
 ```text
 Code Changes                  COMPLETE
+Development Deployment        COMPLETE
+Normal Push E2E Smoke Test     PASS
 Redis reconnect DEV           VALIDATED
-전체 Refactoring DEV E2E      PENDING
+Failure-path DEV Validation    PENDING
 Production Deployment         PENDING
 Production Validation         PENDING
 ```
 
-따라서 이 저장소는 지금 **코드에 반영한 구조와 판단**까지 설명합니다. 운영 안정화 완료, 중복 발송 제거, 효과 검증 완료라고 주장하지 않습니다.
+2026-09-09에는 Java 업무 서비스 / 연계 API / 공통 API를 개발환경에 배포하고 정상 Push E2E Smoke Test를 통과했습니다.
+현재는 **코드 변경 + 정상 발송 경로 DEV 검증**까지 설명하며, failure-path 전체 검증이나 운영 안정화 완료를 주장하지 않습니다.
 
 자세한 변화는 [FCM 1차 리팩토링](docs/ko/09-fcm-refactoring-v1.md)에 정리했습니다.
 
@@ -110,7 +113,7 @@ Production Validation         PENDING
 
 [`diagrams/`](diagrams/README.md)에는 실제 공개 경계와 주요 흐름의 Mermaid 원본이 있습니다.
 
-[`examples/nestjs/`](examples/nestjs/README.md)는 실제 운영 소스가 아닙니다. 실제 구조에서 사용한 역할과 판단을 작은 TypeScript 예제로 옮긴 것이며, 이번 리팩토링의 DEV/PROD 검증 상태보다 앞선 구현 증거로 사용하지 않습니다.
+[`examples/nestjs/`](examples/nestjs/README.md)는 실제 운영 소스가 아닙니다. 실제 구조에서 사용한 역할과 판단을 작은 TypeScript 예제로 옮긴 것이며, 이번 리팩토링에서 문서화한 실제 검증 상태보다 앞선 구현 증거로 사용하지 않습니다.
 
 ## 공개하지 않는 것
 
@@ -129,6 +132,6 @@ Production Validation         PENDING
 - 대규모 durable queue나 replay 기능
 - 모든 메시징 서비스에 그대로 적용되는 정답 구조
 - Flutter 앱 내부 전체 구현에 대한 소유권
-- 현재 1차 리팩토링의 DEV/PROD 검증 완료
+- 현재 1차 리팩토링의 failure-path DEV 검증 완료 또는 PROD 검증 완료
 
 이 저장소의 목적은 시스템 설계 교재를 만드는 것이 아니라, **한 운영 시스템을 만들고 고치면서 판단이 어떻게 바뀌었는지 공개 가능한 선에서 남기는 것**입니다.

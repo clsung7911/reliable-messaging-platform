@@ -99,5 +99,6 @@ FCM Result
 
 ## 현재 검증 상태
 
-코드 변경은 완료했지만 전체 DEV E2E와 운영 검증은 남아 있다.
-따라서 이 문서의 정책을 "운영 효과 검증 완료"로 읽으면 안 된다.
+코드 변경과 정상 Push E2E Smoke Test는 개발환경에서 확인했다.
+다만 timeout/502/504 → `delivery_unknown=true`, retryable 오류, UNREGISTERED 등 failure-path 검증과 운영 검증은 남아 있다.
+따라서 이 문서의 정책을 "오류 경로 전체/운영 효과 검증 완료"로 읽으면 안 된다.

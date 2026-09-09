@@ -54,7 +54,7 @@ timeout / 502 / 504
 → no automatic retry
 ```
 
-The external cause remains unknown. The code change is complete, while overall DEV and production validation remain pending.
+The external cause remains unknown. The normal delivery path is DEV validated, while ambiguous failure-path and production validation remain pending.
 
 ## Investigation rules
 

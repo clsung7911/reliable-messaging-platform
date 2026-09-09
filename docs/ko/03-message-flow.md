@@ -110,8 +110,10 @@ FCM 요청 시작
 
 ```text
 Code Changes                  COMPLETE
+Development Deployment        COMPLETE
+Normal Push E2E Smoke Test     PASS
 Redis reconnect DEV           VALIDATED
-전체 Refactoring DEV E2E      PENDING
+Failure-path DEV Validation    PENDING
 Production Deployment         PENDING
 Production Validation         PENDING
 ```

@@ -124,14 +124,16 @@ timeout / 502 / 504
 ### 현재 상태
 
 ```text
-Policy / Code Change  COMPLETE
-DEV E2E               PENDING
-PROD Deployment       PENDING
-PROD Validation       PENDING
+Policy / Code Change           COMPLETE
+Normal-path DEV Smoke          PASS
+Ambiguous Failure-path DEV     PENDING
+PROD Deployment                PENDING
+PROD Validation                PENDING
 ```
 
-이 사건의 외부 원인은 아직 모른다. 다만 "원인을 모르는 것"과 "중복 발송 위험을 줄이기 위한
-Retry 기준을 정하는 것"은 별개로 봤다.
+2026-09-09 정상 Push 경로에서는 `messageId`, `accepted`, `retryable=false`, `deliveryUnknown=false` contract를 확인했다.
+하지만 실제 timeout/502/504를 발생시켜 `delivery_unknown=true`가 되는 경로는 아직 검증하지 않았다.
+이 사건의 외부 원인도 여전히 모른다. "원인을 모르는 것"과 "중복 발송 위험을 줄이기 위한 Retry 기준을 정하는 것"은 별개로 본다.
 
 ## 공통으로 지키는 조사 방식
 

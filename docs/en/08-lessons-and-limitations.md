@@ -28,8 +28,10 @@ The Java Push path was already asynchronous. The refactoring kept that flow and 
 
 ```text
 Code Changes                  COMPLETE
+Development Deployment        COMPLETE
+Normal Push E2E Smoke Test     PASS
 Redis reconnect DEV           VALIDATED
-Overall Refactoring DEV E2E   PENDING
+Failure-path DEV Validation    PENDING
 Production Deployment         PENDING
 Production Validation         PENDING
 ```
@@ -45,5 +47,5 @@ Production Validation         PENDING
 
 - Flutter display is not proven by FCM acceptance.
 - Real routes, keys, thresholds, retry counts, and topology are withheld.
-- The current refactoring has not completed overall DEV or production validation.
+- The normal Push path is DEV validated, but failure-path and production validation are not complete.
 - The external root cause of timeout/502/504 remains `UNKNOWN / PENDING`.

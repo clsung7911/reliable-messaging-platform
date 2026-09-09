@@ -45,7 +45,7 @@ timeout이나 `delivery_unknown`처럼 결과가 애매한 상황에서
 ## 현재 상태
 
 `X-Message-Id` 전파와 Retry ID 유지 코드는 반영했다.
-전체 DEV E2E와 운영 검증은 아직 PENDING이다.
+정상 Push E2E에서 동일 `messageId` correlation은 DEV 검증했다. Retry/failure-path와 운영 검증은 아직 PENDING이다.
 
 ## 공개 제한
 

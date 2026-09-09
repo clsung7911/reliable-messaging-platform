@@ -172,32 +172,54 @@ FCM Result
 | Java Push | 기존 Async | Async 유지 + 전용 Executor/HTTP Client |
 | Redis reconnect | 제한 후 중단 가능 | Command fast fail + connection 지속 reconnect |
 
+## Development Validation — 2026-09-09
+
+1차 리팩토링 코드를 개발환경의 실제 서비스 경로에 배포한 뒤 정상 Push 경로를 기준으로 Smoke Test를 진행했다.
+
+### Deployment
+
+- Java 업무 서비스: PASS
+- 연계 API: PASS
+- 공통 API: PASS
+
+### Verified Behaviors
+
+- 정상 Push E2E: PASS
+- `messageId` correlation: PASS
+- FCM 정상 응답 → `accepted` contract: PASS
+- Redis 발송 상태 `delivering → delivered`: PASS
+- 정상 성공 경로 `retryable=false`: PASS
+- 정상 성공 경로 `deliveryUnknown=false`: PASS
+- 동일 조건 연속 정상 발송 2회: PASS
+
+이 결과로 확인한 것은 **정상 발송 경로와 정상 contract가 개발환경에서 실제로 동작한다는 것**이다.
+`delivery_unknown=true`, `retryable=true`, UNREGISTERED 재확인, 후처리 실패 주입, Executor saturation 같은 오류 경로 전체가 검증됐다는 뜻은 아니다.
+
 ## Validation Status
 
 ```text
 Code Changes                  COMPLETE
+Development Deployment        COMPLETE
+Normal Push E2E Smoke Test     PASS
 Redis reconnect DEV           VALIDATED
-전체 Refactoring Build/E2E    PENDING
-Development Deployment        PENDING
+Failure-path DEV Validation    PENDING
 Production Deployment         PENDING
 Production Validation         PENDING
 ```
 
-Redis reconnect 변경은 별도로 개발환경 확인까지 끝났지만,
-나머지 1차 리팩토링 전체를 DEV/PROD에서 검증했다고 합쳐서 표현하지 않는다.
-
 ## Remaining Work
 
-- 개발환경 Build / 배포 / E2E
-- `accepted / delivery_unknown / failed / skipped_unregistered` 분기 확인
-- retry queue 진입 여부 확인
-- 후처리 실패 시 outcome 보존 확인
-- Push Executor / HTTP Client 오류 경로 확인
+- timeout / 502 / 504를 실제로 발생시켜 `delivery_unknown=true`와 자동 Retry 제외 확인
+- `retryable=true` 오류 경로와 retry queue 진입 여부 확인
+- UNREGISTERED 재확인 분기 확인
+- 후처리 실패 주입 시 이미 확정한 outcome 보존 확인
+- Push Executor saturation / reject와 HTTP 오류 경로 확인
 - 운영 반영 후 실제 로그·상태·messageId correlation 확인
 - timeout/502/504 외부 Root Cause는 별도 조사 유지
 
 ## 지금 이 문서가 주장하는 범위
 
-> 실제 운영 장애와 코드를 다시 보고, 실패와 재시도 기준을 바꿔 **코드에 반영한 상태**다.
+> 실제 운영 장애와 코드를 다시 보고 실패와 재시도 기준을 바꿨고,
+> **개발환경의 정상 Push E2E 경로에서 변경된 contract와 correlation이 동작하는 것까지 확인했다.**
 
-그 이상은 아직 쓰지 않는다.
+Failure-path 전체 검증과 Production 검증은 아직 남아 있다.

@@ -65,8 +65,10 @@ Current validation status:
 
 ```text
 Code Changes                  COMPLETE
+Development Deployment        COMPLETE
+Normal Push E2E Smoke Test     PASS
 Redis reconnect DEV           VALIDATED
-Overall Refactoring DEV E2E   PENDING
+Failure-path DEV Validation    PENDING
 Production Deployment         PENDING
 Production Validation         PENDING
 ```
@@ -101,7 +103,7 @@ See [FCM Reliability Refactoring v1](docs/en/09-fcm-refactoring-v1.md).
 
 [`diagrams/`](diagrams/README.md) contains Mermaid source for the public representation of the real boundaries and flows.
 
-[`examples/nestjs/`](examples/nestjs/README.md) is not production source code and is not evidence that the current refactoring has completed DEV or production validation.
+[`examples/nestjs/`](examples/nestjs/README.md) is not production source code and is not evidence beyond the validation state documented here.
 
 ## What is not published
 
@@ -120,6 +122,6 @@ See [FCM Reliability Refactoring v1](docs/en/09-fcm-refactoring-v1.md).
 - durable large-scale queueing or replay,
 - a universal messaging architecture,
 - ownership of the Flutter client's entire implementation,
-- completed DEV or production validation for the current refactoring.
+- completed failure-path DEV validation or production validation for the current refactoring.
 
 The purpose is not to write a messaging textbook. It is to show, within a safe disclosure boundary, **how one operated system evolved as incidents changed my engineering decisions**.

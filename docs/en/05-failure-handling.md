@@ -39,4 +39,4 @@ The refactoring finalizes the FCM outcome before PushLog/Redis/token-state side 
 
 ## Current validation status
 
-The code changes are complete. Overall DEV E2E and production validation are still pending.
+The code changes and the normal Push E2E smoke test are complete in DEV. Failure-path validation and production validation are still pending.

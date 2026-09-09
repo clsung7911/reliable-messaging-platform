@@ -61,15 +61,35 @@ Java async event
 
 This is an evolution of the existing system, not a replacement architecture.
 
+## Development validation — 2026-09-09
+
+The refactored services were deployed to the development environment and a normal-path Push smoke test was executed through the real service boundaries.
+
+Verified in DEV:
+
+- Java business service deployment: PASS
+- integration API deployment: PASS
+- common API deployment: PASS
+- normal Push E2E: PASS
+- `messageId` correlation: PASS
+- normal FCM response → `accepted`: PASS
+- Redis `delivering → delivered`: PASS
+- normal success path `retryable=false`: PASS
+- normal success path `deliveryUnknown=false`: PASS
+- two consecutive normal sends: PASS
+
+This validates the normal delivery path and normal result contract. It does not validate every failure branch such as `delivery_unknown=true`, retryable failures, UNREGISTERED rechecks, post-processing failure injection, or executor saturation.
+
 ## Validation status
 
 ```text
 Code Changes                  COMPLETE
+Development Deployment        COMPLETE
+Normal Push E2E Smoke Test     PASS
 Redis reconnect DEV           VALIDATED
-Overall Refactoring DEV E2E   PENDING
-Development Deployment        PENDING
+Failure-path DEV Validation    PENDING
 Production Deployment         PENDING
 Production Validation         PENDING
 ```
 
-The current public claim stops at implemented code and the separately DEV-validated Redis reconnect change. Operational effect is not yet claimed.
+The current public claim stops at implemented code plus the DEV-validated normal delivery path and Redis reconnect behavior. Production effect is not yet claimed.

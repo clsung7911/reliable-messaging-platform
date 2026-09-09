@@ -39,4 +39,4 @@ Retry Semantics: CODE COMPLETE
 
 ## 현재 상태
 
-코드 반영은 완료했고 전체 DEV/PROD 검증은 PENDING이다.
+코드 반영과 정상 성공 contract(`deliveryUnknown=false`)는 DEV에서 확인했다. 실제 ambiguous failure에서 `delivery_unknown=true`가 되는 경로와 PROD 검증은 PENDING이다.

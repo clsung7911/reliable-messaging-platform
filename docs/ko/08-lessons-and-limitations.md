@@ -41,12 +41,14 @@ Executor isolation은 병목 제거와 같은 말이 아니다.
 
 ### 6. CODE COMPLETE와 PROD VALIDATED는 다르다
 
-현재 1차 리팩토링은 코드 변경까지 완료했고 Redis reconnect만 DEV에서 별도 검증했다.
+현재 1차 리팩토링은 코드 변경과 개발환경 배포를 완료했고, 정상 Push E2E Smoke Test와 Redis reconnect를 DEV에서 확인했다. failure-path 전체 검증은 아직 남아 있다.
 
 ```text
 Code Changes                  COMPLETE
+Development Deployment        COMPLETE
+Normal Push E2E Smoke Test     PASS
 Redis reconnect DEV           VALIDATED
-전체 Refactoring DEV E2E      PENDING
+Failure-path DEV Validation    PENDING
 Production Deployment         PENDING
 Production Validation         PENDING
 ```

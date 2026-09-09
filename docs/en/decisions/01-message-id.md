@@ -6,4 +6,4 @@ The same `messageId` is kept across retries. `X-Message-Id` carries that correla
 
 This supports log/state/retry correlation; it does not provide exactly-once delivery. The real ID format is not published.
 
-The code change is complete. Overall DEV E2E and production validation remain pending.
+The code change is complete, and normal-path `messageId` correlation is DEV validated. Retry/failure-path and production validation remain pending.

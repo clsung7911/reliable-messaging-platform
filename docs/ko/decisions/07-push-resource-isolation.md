@@ -38,5 +38,5 @@ Queue 기반 구조가 필요할 정도의 durable backlog/replay 요구는 이�
 
 ## 현재 상태
 
-코드 변경 완료.
-전체 DEV E2E와 운영 검증은 PENDING이다.
+코드 변경과 개발환경 배포, 정상 Push E2E는 확인했다.
+Executor saturation/reject 등 failure-path와 운영 검증은 PENDING이다.

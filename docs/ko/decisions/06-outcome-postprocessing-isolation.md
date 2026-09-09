@@ -44,4 +44,4 @@ Provider outcome과 내부 Redis/로그 상태가 일시적으로 어긋날 수 
 ## 현재 상태
 
 코드 변경 완료.
-DEV E2E와 운영 검증은 PENDING이다.
+정상 accepted 경로와 Redis 상태전이는 DEV에서 확인했다. 후처리 실패 주입과 운영 검증은 PENDING이다.

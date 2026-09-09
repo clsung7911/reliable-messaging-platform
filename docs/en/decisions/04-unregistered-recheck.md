@@ -10,4 +10,4 @@ After the first `UNREGISTERED`, the same send is confirmed once.
 
 A different error during confirmation is not proof that the token is invalid.
 
-The refactoring also propagates typed outcome semantics upward so confirmed UNREGISTERED is terminal instead of being blindly placed on a retry queue. Code change is complete; overall DEV/production validation is pending.
+The refactoring also propagates typed outcome semantics upward so confirmed UNREGISTERED is terminal instead of being blindly placed on a retry queue. Code change is complete and the normal path is DEV validated; UNREGISTERED failure-path and production validation remain pending.

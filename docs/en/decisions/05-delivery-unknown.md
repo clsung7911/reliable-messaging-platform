@@ -14,4 +14,4 @@ This reduces duplicate-delivery risk for timeout/502/504 paths.
 
 The external root cause remains `UNKNOWN / PENDING`. Retry semantics can be improved without pretending the root cause is known.
 
-Code change is complete; DEV/production validation is pending.
+Code change is complete and the normal success contract is DEV validated; actual ambiguous-failure `delivery_unknown=true` behavior and production validation remain pending.
