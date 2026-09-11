@@ -82,6 +82,10 @@ failed
 
 `accepted` means the server observed a successful FCM response. It does not prove display on the Flutter client.
 
+## Flutter client
+
+The Flutter app is the final consumer in this delivery path, and **I directly developed and built the mobile app itself.** This repository focuses on the server-side messaging path and its reliability evolution, so detailed client-side implementation is intentionally outside the documentation scope.
+
 ## No invented deployment components
 
 Responsibilities are described inside the real integration API, common API, Redis, outbound path, and FCM boundaries. I do not introduce abstract components as if they had been separately deployed.

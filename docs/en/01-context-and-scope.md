@@ -41,7 +41,7 @@ The two NestJS layers have different responsibilities.
 - Integration API: recipient/device/state lookup, `messageId`, outcome interpretation, retry decision
 - Common API: FCM access-token/send context and the actual provider request
 
-My direct scope centers on the Push path after the Java integration boundary:
+My direct scope centers on the Push path after the Java integration boundary, and I also directly developed and built the Flutter mobile app at the receiving end:
 
 - the existing Java async event path and Push resource isolation,
 - the NestJS integration and common API delivery path,
@@ -52,9 +52,10 @@ My direct scope centers on the Push path after the Java integration boundary:
 - `UNREGISTERED` handling,
 - `delivery_unknown` and retry semantics,
 - monitoring and log analysis,
-- incident investigation and application-side remediation.
+- incident investigation and application-side remediation,
+- direct development and build-out of the Flutter mobile app and its FCM integration.
 
-The legacy business service and Flutter client remain upstream/downstream boundaries. I do not claim ownership of their entire internal implementations.
+I do not claim ownership of the legacy business service as a whole. The Flutter mobile app, however, was directly developed and built by me. It remains the downstream boundary in these diagrams because this repository focuses on the messaging-server path; detailed app internals are intentionally outside the documentation scope.
 
 ## Problems that shaped the design
 
