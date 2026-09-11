@@ -2,7 +2,7 @@
 
 **English** | [한국어](README.ko.md)
 
-This repository documents an FCM notification path that I designed, developed, and operated, rewritten into a form I can share publicly while preparing for a career move.
+This repository documents the FCM notification path I designed, developed, and operated, together with the **Flutter mobile app I directly built at the receiving end**, rewritten into a form I can share publicly while preparing for a career move.
 
 It is not a newly invented messaging product. I reviewed the real operating structure and records and kept the **problems I encountered, the decisions I made, and the changes I implemented**. Proprietary details are removed without replacing the real service boundaries with an idealized architecture.
 
@@ -43,7 +43,7 @@ flowchart LR
 
 Public names describe roles only. Internal routes, hosts, Redis keys, and operating values are removed, while the service order and technology boundaries remain faithful to the system I worked on.
 
-My direct scope centers on the Push path after the Java integration boundary, the NestJS integration and common APIs used for FCM sending, Redis-backed state, FCM integration, monitoring, and incident response. I do not claim ownership of the legacy service or the Flutter client's entire internal implementation.
+My direct scope centers on the Push path after the Java integration boundary, the NestJS integration and common APIs used for FCM sending, Redis-backed state, FCM integration, monitoring, and incident response. **I also directly developed and built the Flutter mobile app that consumes these notifications.** I do not claim ownership of the legacy business service as a whole. This repository focuses on the messaging-server path, so detailed Flutter app internals are intentionally outside its documentation scope.
 
 ## 2026-09 · FCM Reliability Refactoring v1
 
@@ -121,7 +121,7 @@ See [FCM Reliability Refactoring v1](docs/en/09-fcm-refactoring-v1.md).
 - exactly-once delivery across an external provider,
 - durable large-scale queueing or replay,
 - a universal messaging architecture,
-- ownership of the Flutter client's entire implementation,
+- complete documentation of the Flutter client's internal implementation,
 - completed failure-path DEV validation or production validation for the current refactoring.
 
 The purpose is not to write a messaging textbook. It is to show, within a safe disclosure boundary, **how one operated system evolved as incidents changed my engineering decisions**.
